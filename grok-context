@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# Check if a directory is provided, default to current directory (./)
+DIR="${1:-./}"
+
+# Convert to absolute path to avoid relative path issues
+DIR=$(realpath "$DIR" 2>/dev/null || readlink -f "$DIR" 2>/dev/null || echo "$DIR")
+
+# Ensure the provided path is a valid directory
+if [ ! -d "$DIR" ]; then
+  echo "Error: '$DIR' is not a valid directory."
+  exit 1
+fi
+
+# Ensure the directory path ends with a slash for consistent pattern matching
+DIR="${DIR%/}/"
+
+# Check if the directory is writable
+if [ ! -w "$DIR" ]; then
+  echo "Error: No write permissions in '$DIR'."
+  exit 1
+fi
+
+# Path to .grokignore file
+GROKIGNORE="${DIR}.grokignore"
+
+# Output file in the input directory
+OUTPUT_FILE="${DIR}context.txt"
+
+# Initialize find exclusion arguments
+EXCLUDE_ARGS=()
+
+# Function to convert .grokignore patterns to find exclusions
+add_exclusion() {
+  local pattern="$1"
+  # Handle directory patterns (ending with /)
+  if [[ "$pattern" == */ ]]; then
+    pattern="${pattern%/}"
+    EXCLUDE_ARGS+=(-not -path "${DIR}${pattern}/*" -not -path "${DIR}${pattern}")
+  # Handle patterns with directory separators (e.g., images/file.txt)
+  elif [[ "$pattern" == */* ]]; then
+    EXCLUDE_ARGS+=(-not -path "${DIR}${pattern}/*" -not -path "${DIR}${pattern}")
+  # Handle wildcard patterns (e.g., *.txt)
+  elif [[ "$pattern" == *\* ]]; then
+    EXCLUDE_ARGS+=(-not -name "$pattern")
+  # Handle exact file or directory names (no slashes, no wildcards)
+  else
+    EXCLUDE_ARGS+=(-not -path "${DIR}${pattern}/*" -not -path "${DIR}${pattern}" -not -name "$pattern")
+  fi
+}
+
+# Read .grokignore file if it exists
+if [ -f "$GROKIGNORE" ]; then
+  # Process each line in .grokignore, ignoring comments and empty lines
+  while IFS= read -r line; do
+    # Skip empty lines and comments
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+    # Remove leading/trailing whitespace
+    line=$(echo "$line" | tr -d '[:space:]')
+    # Skip if line is empty after trimming
+    [[ -z "$line" ]] && continue
+    add_exclusion "$line"
+  done < "$GROKIGNORE"
+else
+  echo "Warning: No .grokignore file found in $DIR. No additional exclusions applied."
+fi
+
+# Clear context.txt in the input directory before writing (overwrite mode)
+> "$OUTPUT_FILE"
+
+# Run find command with dynamic exclusions, appending to context.txt with relative paths
+find "$DIR" -type f "${EXCLUDE_ARGS[@]}" -exec sh -c 'relpath="${1#$2}"; echo "File: $relpath" >> "$3"; cat "$1" >> "$3"; echo "" >> "$3"' sh "{}" "$DIR" "$OUTPUT_FILE" \;
+
+echo "Output written to $OUTPUT_FILE"
