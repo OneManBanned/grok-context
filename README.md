@@ -33,5 +33,5 @@ File: src/main.js
 console.log("Hello, world!");
 
 File: lib/utils.js
-function add(a, b) { return a + b; }
+function add(a, b) { return a + b; };
 
